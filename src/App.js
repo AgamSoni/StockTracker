@@ -212,7 +212,7 @@ const handleChartClick = (data) => {
             </div>
           )}
 
-          <ResponsiveContainer width="95%" height={300}>
+          <ResponsiveContainer width="75%" height={300}>
             <LineChart data={data} margin={{ top: 20, right: 40, left: 20, bottom: 20 }} onClick={handleChartClick}>
               <XAxis dataKey="date" tickFormatter={(tick) => tick.substring(5)} />
               <YAxis />
