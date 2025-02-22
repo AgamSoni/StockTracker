@@ -4,10 +4,13 @@ import { Card, CardContent } from "./components/ui/Card";
 import { Button } from "./components/ui/Button";
 import axios from "axios";
 
-const fetchFromYahooFinance = async (stockSymbol) => {
+const API_KEY = 'cusmr6hr01qnihs7i850cusmr6hr01qnihs7i85g';
+const FINNHUB_URL = 'https://finnhub.io/api/v1/quote';
+
+const fetchFromYahooFinance = async (stockSymbol, range) => {
   try {
     const response = await axios.get(
-      `/yahoo-finance-api/v8/finance/chart/${stockSymbol}?range=1mo&interval=1d`
+      `/yahoo-finance-api/v8/finance/chart/${stockSymbol}?range=${range}&interval=1d`
     );
     const result = response.data.chart.result[0];
     if (!result || !result.timestamp) {
@@ -24,138 +27,213 @@ const fetchFromYahooFinance = async (stockSymbol) => {
   }
 };
 
-const fetchFromAlphaVantage = async (stockSymbol, range, apiKey) => {
+const fetchRealTimeData = async (stockSymbol) => {
+  try {
+    const response = await axios.get(FINNHUB_URL, {
+      params: {
+        symbol: stockSymbol,
+        token: API_KEY,
+      },
+    });
+    return response.data;  // { c, d, m, v, h, l }
+  } catch (error) {
+    console.error('Error fetching real-time data:', error);
+    return null;
+  }
+};
+
+const fetchStockSuggestions = async (query) => {
+  if (!query) return [];
   try {
     const response = await axios.get(
-      `https://www.alphavantage.co/query?function=${range}&symbol=${stockSymbol}&apikey=${apiKey}`
+      `/yahoo-finance-api/v1/finance/search?q=${query}&lang=en-US&region=US`
     );
-    const timeSeries = response.data["Time Series (Daily)"] || response.data["Time Series (Weekly)"] || response.data["Time Series (Monthly)"];
-    if (!timeSeries) throw new Error("No data from Alpha Vantage");
-    return Object.keys(timeSeries).map((date) => ({
-      date,
-      symbol: stockSymbol,
-      close: parseFloat(timeSeries[date]["4. close"]),
-    }));
+    if (!response.data.quotes) return [];
+    return response.data.quotes
+      .filter((item) => item.symbol && item.shortname)
+      .map((item) => ({
+        symbol: item.symbol,
+        name: item.shortname || item.longname || item.symbol,
+      }));
   } catch (error) {
-    console.error("Alpha Vantage error", error);
-    // If Alpha Vantage fails, return null to signal fallback
-    return null;
+    console.error("Error fetching suggestions:", error);
+    return [];
   }
 };
 
 const StockTrendApp = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [symbol, setSymbol] = useState("AAPL");
+  const [symbol, setSymbol] = useState("");
   const [symbols, setSymbols] = useState(["AAPL", "TSLA"]);
-  const [range, setRange] = useState("TIME_SERIES_DAILY");
-  const API_KEY = "ELJ8TOLQ8C9ZI2PN";
+  const [suggestions, setSuggestions] = useState([]);
+  const [range, setRange] = useState("1d");
+  const [liveData, setLiveData] = useState(null);
+  const [selectedSymbols, setSelectedSymbols] = useState([...symbols]);
+  const [companyName, setCompanyName] = useState("");
 
-  // Memoize fetchStockData function to avoid unnecessary re-renders
-  const fetchStockData = useCallback(async (stockSymbols) => {
+  const fetchStockData = useCallback(async (stockSymbols, range) => {
     setLoading(true);
     try {
       const fetchedData = await Promise.all(
         stockSymbols.map(async (stockSymbol) => {
-          // First, try fetching data from Yahoo Finance
-          let stockData = await fetchFromYahooFinance(stockSymbol);
-
-          // If Yahoo Finance fails, fallback to Alpha Vantage
+          let stockData = await fetchFromYahooFinance(stockSymbol, range);
           if (!stockData) {
-            console.warn(`Yahoo Finance error for ${stockSymbol}. Falling back to Alpha Vantage.`);
-            stockData = await fetchFromAlphaVantage(stockSymbol, range, API_KEY);
-          }
-
-          // If Alpha Vantage also fails, log a message and return an empty array
-          if (!stockData) {
-            console.error(`Failed to fetch data for ${stockSymbol} from both Yahoo Finance and Alpha Vantage.`);
+            console.error(`Failed to fetch data for ${stockSymbol} from Yahoo Finance.`);
             return [];
           }
-
-          console.log(`Fetched data for ${stockSymbol}:`, stockData); // Log the fetched data
           return stockData || [];
         })
       );
-      
-      // Sort data so that it's in ascending order (oldest date on the left)
       const sortedData = fetchedData.flat().sort((a, b) => new Date(a.date) - new Date(b.date));
-      setData(sortedData); // Set the sorted data
-      console.log("Updated chart data:", sortedData); // Log updated sorted data
+      setData(sortedData);
     } catch (error) {
       console.error("Error fetching stock data", error);
     }
     setLoading(false);
-  }, [range]); // Add range as a dependency for fetchStockData
+  }, [range]);
 
-  // Effect to fetch stock data when symbols or range changes
+  const fetchLiveData = useCallback(async () => {
+    if (selectedSymbols.length > 0) {
+      const realTimeData = await fetchRealTimeData(selectedSymbols[selectedSymbols.length - 1]); // Fetch for the last selected symbol
+      const name = suggestions.find(s => s.symbol === selectedSymbols[selectedSymbols.length - 1])?.name || selectedSymbols[selectedSymbols.length - 1];
+      setCompanyName(name);
+      setLiveData(realTimeData);
+    }
+  }, [selectedSymbols, suggestions]);
+
   useEffect(() => {
-    fetchStockData(symbols);
-  }, [symbols, fetchStockData]); // Only need symbols and memoized fetchStockData here
-
-  const handleRemoveSymbol = (symbolToRemove) => {
-    setSymbols(symbols.filter((s) => s !== symbolToRemove));
-  };
+    if (symbols.length > 0) {
+      fetchStockData(symbols, range);  // Fetch historical data
+      fetchLiveData();                  // Fetch real-time data for the first symbol
+    }
+  }, [symbols, range, fetchStockData, fetchLiveData]);
 
   const handleAddSymbol = () => {
+    if (!symbol) return;
     if (symbols.includes(symbol)) {
       alert("This stock is already in the comparison list.");
-      return; // Don't add the stock if it's already in the list
+      return;
     }
     setSymbols([...symbols, symbol]);
+    setSymbol(""); // Clear input field after adding stock
   };
+
+  const handleInputChange = async (e) => {
+    const query = e.target.value.toUpperCase();
+    setSymbol(query);
+    if (query.length > 1) {
+      const results = await fetchStockSuggestions(query);
+      setSuggestions(results);
+    } else {
+      setSuggestions([]);
+    }
+  };
+
+  const handleSuggestionClick = (selectedSymbol) => {
+    setSymbol(selectedSymbol);  // Set the selected symbol
+    setSuggestions([]);         // Clear the suggestions list
+    if (!symbols.includes(selectedSymbol)) {
+      setSymbols([...symbols, selectedSymbol]);  // Add the selected symbol to the list
+    } else {
+      alert("This stock is already in the comparison list.");
+    }
+  };
+
+  const handleStockSelection = (symbol) => {
+    setSelectedSymbols((prev) => 
+      prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]
+    );
+  };
+
+const handleChartClick = (data) => {
+  if (data && data.payload && data.payload.symbol) {
+    const clickedSymbol = data.payload.symbol;
+    setSelectedSymbols([clickedSymbol]);
+    const selectedCompany = suggestions.find(s => s.symbol === clickedSymbol)?.name || clickedSymbol;
+    setCompanyName(selectedCompany);
+    fetchLiveData(); // Fetch new live data for the clicked symbol
+  }
+};
+
+
+  useEffect(() => {
+    fetchLiveData();
+  }, [selectedSymbols, fetchLiveData]);
 
   return (
     <div className="p-4">
       <h1 className="text-xl font-bold text-center mb-4">Stock Trend Viewer</h1>
       <Card className="p-4 shadow-lg rounded-lg">
         <CardContent>
-          <div className="flex gap-2 mb-4">
-            <input 
-              type="text" 
-              value={symbol} 
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())} 
-              placeholder="Enter stock symbol" 
+          <div className="relative mb-4">
+            <input
+              type="text"
+              value={symbol}
+              onChange={handleInputChange}
+              placeholder="Enter stock symbol"
               className="p-2 border rounded w-full"
             />
-            <Button onClick={handleAddSymbol} disabled={loading}>
-              {loading ? "Loading..." : "Add Stock"}
-            </Button>
+            {suggestions.length > 0 && (
+              <ul className="absolute bg-white border w-full mt-1 rounded shadow-md max-h-40 overflow-y-auto">
+                {suggestions.map((s) => (
+                  <li
+                    key={s.symbol}
+                    onClick={() => handleSuggestionClick(s.symbol)}
+                    className="p-2 cursor-pointer hover:bg-gray-100"
+                  >
+                    {s.symbol} - {s.name}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
+          <Button onClick={handleAddSymbol} disabled={loading || !symbol}>
+            {loading ? "Loading..." : "Add Stock"}
+          </Button>
+
           <select className="p-2 border rounded mb-4" value={range} onChange={(e) => setRange(e.target.value)}>
-            <option value="TIME_SERIES_DAILY">Daily</option>
-            <option value="TIME_SERIES_WEEKLY">Weekly</option>
-            <option value="TIME_SERIES_MONTHLY">Monthly</option>
+            <option value="1d">1 Day</option>
+            <option value="5d">5 Days</option>
+            <option value="1mo">1 Month</option>
+            <option value="6mo">6 Months</option>
+            <option value="ytd">YTD</option>
+            <option value="1y">1 Year</option>
+            <option value="5y">5 Years</option>
           </select>
+
+          {liveData && companyName && (
+            <div className="mb-4">
+              <h2>{companyName} ({selectedSymbols[selectedSymbols.length - 1]})</h2>
+              <p>Live Price: ${liveData.c}</p>
+              <p>Change: {liveData.d}%</p>
+              <p>52 Week High: {liveData.h}</p>
+              <p>52 Week Low: {liveData.l}</p>
+            </div>
+          )}
+
           <ResponsiveContainer width="95%" height={300}>
-            <LineChart data={data} margin={{ top: 20, right: 40, left: 20, bottom: 20 }}>
+            <LineChart data={data} margin={{ top: 20, right: 40, left: 20, bottom: 20 }} onClick={handleChartClick}>
               <XAxis dataKey="date" tickFormatter={(tick) => tick.substring(5)} />
               <YAxis />
               <Tooltip />
               <Legend />
-              {symbols.map((s) => (
-                <Line 
-                  key={s} 
-                  type="monotone" 
-                  dataKey="close" 
-                  name={s} 
-                  data={data.filter(d => d.symbol === s)} 
-                  strokeWidth={2} 
-                />
+              {selectedSymbols.map((s) => (
+                <Line key={s} type="monotone" dataKey="close" name={s} data={data.filter(d => d.symbol === s)} strokeWidth={2} />
               ))}
             </LineChart>
           </ResponsiveContainer>
+
           <div className="mt-4">
             <h3 className="font-bold">Comparing:</h3>
             <ul className="list-disc pl-6">
               {symbols.map((s) => (
-                <li key={s} className="flex justify-between">
-                  {s}
-                  <button 
-                    onClick={() => handleRemoveSymbol(s)} 
-                    className="text-red-500 ml-2"
-                  >
-                    Remove
-                  </button>
+                <li
+                  key={s}
+                  className="flex justify-between cursor-pointer"
+                  onClick={() => handleStockSelection(s)}
+                >
+                  {s} {selectedSymbols.includes(s) ? "(Selected)" : "(Click to select)"}
                 </li>
               ))}
             </ul>
