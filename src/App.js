@@ -129,7 +129,7 @@ const StockTrendApp = () => {
       setSuggestions([]);
     }
   };
-
+// the following function does not work and needs to be fixed.
   const handleSuggestionClick = (selectedSymbol) => {
     setSymbol(selectedSymbol);  // Set the selected symbol
     setSuggestions([]);         // Clear the suggestions list
