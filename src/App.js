@@ -146,17 +146,6 @@ const StockTrendApp = () => {
     );
   };
 
-const handleChartClick = (data) => {
-  if (data && data.payload && data.payload.symbol) {
-    const clickedSymbol = data.payload.symbol;
-    setSelectedSymbols([clickedSymbol]);
-    const selectedCompany = suggestions.find(s => s.symbol === clickedSymbol)?.name || clickedSymbol;
-    setCompanyName(selectedCompany);
-    fetchLiveData(); // Fetch new live data for the clicked symbol
-  }
-};
-
-
   useEffect(() => {
     fetchLiveData();
   }, [selectedSymbols, fetchLiveData]);
@@ -212,8 +201,8 @@ const handleChartClick = (data) => {
             </div>
           )}
 
-          <ResponsiveContainer width="75%" height={300}>
-            <LineChart data={data} margin={{ top: 20, right: 40, left: 20, bottom: 20 }} onClick={handleChartClick}>
+          <ResponsiveContainer width="95%" height={300}>
+            <LineChart data={data} margin={{ top: 20, right: 40, left: 20, bottom: 20 }}>
               <XAxis dataKey="date" tickFormatter={(tick) => tick.substring(5)} />
               <YAxis />
               <Tooltip />
